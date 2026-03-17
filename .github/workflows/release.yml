@@ -1,0 +1,51 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (es. v1.2.3)"
+        required: true
+      prerelease:
+        description: "Create as prerelease"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore EverythingQuickSearch.slnx
+
+      - name: Publish
+        run: dotnet publish EverythingQuickSearch/EverythingQuickSearch.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+
+      - name: Copy runtime dependency
+        run: Copy-Item EverythingQuickSearch/Everything64.dll publish/Everything64.dll -Force
+        shell: pwsh
+
+      - name: Create zip package
+        run: Compress-Archive -Path publish/* -DestinationPath EverythingQuickSearch-${{ github.event.inputs.tag }}-win-x64.zip -Force
+        shell: pwsh
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag }}
+          name: ${{ github.event.inputs.tag }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          files: EverythingQuickSearch-${{ github.event.inputs.tag }}-win-x64.zip
+          generate_release_notes: true
