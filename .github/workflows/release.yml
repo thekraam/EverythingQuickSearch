@@ -28,7 +28,7 @@ jobs:
           global-json-file: global.json
 
       - name: Restore
-        run: dotnet restore EverythingQuickSearch.slnx
+        run: dotnet restore EverythingQuickSearch/EverythingQuickSearch.csproj
 
       - name: Publish
         run: dotnet publish EverythingQuickSearch/EverythingQuickSearch.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
