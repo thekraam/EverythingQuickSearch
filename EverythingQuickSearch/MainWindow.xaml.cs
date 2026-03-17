@@ -214,7 +214,9 @@ namespace EverythingQuickSearch
 
         private bool _isAppLoading = false;
         private bool _isFileLoading = false;
-        private string shortcutFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Everything Quick Search");
+        private readonly string shortcutFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Everything Quick Search");
+        private readonly string userStartMenuPrograms = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
+        private readonly string commonStartMenuPrograms = Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms);
 
         private readonly SemaphoreSlim _thumbnailSemaphore = new SemaphoreSlim(Math.Max(Environment.ProcessorCount - 1, 1));
 
@@ -715,12 +717,9 @@ namespace EverythingQuickSearch
                 List<FileItem> tempList;
                 try
                 {
-                    string searchText2 = $"ext:lnk;url;exe {searchText} file: " +
-                     $"\"C:\\Users\\{Environment.UserName}\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\" | " +
-                     @"""C:\ProgramData\Microsoft\Windows\Start Menu\Programs\"" | "
-                + "\"" + shortcutFolder + "\"";
+                    string searchText2 = BuildAppSearchQuery(searchText);
 
-                    tempList = await _everything.SearchAsync(searchText2, 1, 0, 5, false);
+                    tempList = await _everything.SearchAsync(searchText2, 1, 0, PageSize, false);
                     foreach (var item in tempList)
                     {
                         item.Name = Path.GetFileNameWithoutExtension(item.Name);
@@ -1259,32 +1258,41 @@ namespace EverythingQuickSearch
             using (var appsFolder = (ShellContainer)ShellObject.FromParsingName("shell:AppsFolder"))
             {
                 List<string> existingUwps = new List<string>();
-                string shortcutFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Everything Quick Search");
                 Directory.CreateDirectory(shortcutFolder);
 
-                // get uwp apps and create shortcuts for them if not exist, so they can be searched by everything
+                // get apps from shell:AppsFolder and create shortcuts so they can be searched by Everything
                 foreach (var item in appsFolder)
                 {
                     try
                     {
-                        if (item.ParsingName.EndsWith("!App"))
+                        if (string.IsNullOrWhiteSpace(item.Name) || string.IsNullOrWhiteSpace(item.ParsingName))
                         {
-                            existingUwps.Add(item.Name);
+                            continue;
                         }
-                        if (item.ParsingName.EndsWith("!App") && !File.Exists($@"{shortcutFolder}\{item.Name}.lnk"))
+
+                        if (!item.ParsingName.Contains("!", StringComparison.OrdinalIgnoreCase))
                         {
-                            Debug.WriteLine("add new" + item.Name);
-                            string shortcutPath = $@"{shortcutFolder}\{item.Name}.lnk";
-                            string appUserModelId = item.ParsingName;
+                            continue;
+                        }
+
+                        existingUwps.Add(item.Name);
+
+                        string shortcutPath = Path.Combine(shortcutFolder, item.Name + ".lnk");
+                        if (!File.Exists(shortcutPath))
+                        {
+                            Debug.WriteLine("add new " + item.Name);
 
                             var shortcut = (IWshShortcut)new WshShell().CreateShortcut(shortcutPath);
 
                             shortcut.TargetPath = $"shell:AppsFolder\\{item.ParsingName}";
-                            shortcut.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+                            shortcut.WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
                             shortcut.Save();
                         }
                     }
-                    catch { }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"LoadUwpApps failed for '{item?.Name}': {ex.Message}");
+                    }
                 }
 
                 foreach (var file in Directory.GetFiles(shortcutFolder, "*.lnk"))
@@ -1304,6 +1312,21 @@ namespace EverythingQuickSearch
                 }
 
             }
+        }
+
+        private string BuildAppSearchQuery(string searchText)
+        {
+            var searchRoots = new[]
+            {
+                userStartMenuPrograms,
+                commonStartMenuPrograms,
+                shortcutFolder
+            }
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => $"\"{path}\"");
+
+            return $"ext:lnk;url;exe {searchText} file: {string.Join(" | ", searchRoots)}";
         }
 
         private async void FileItemTemplate_MouseDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
